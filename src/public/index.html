@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>机械表换表 / 读数回拨 证据化处理演示</title>
+<style>
+  :root { --bd:#d7dce3; --mut:#6b7280; --warn:#b45309; --warnbg:#fffbeb; --ok:#047857; --okbg:#ecfdf5; --blue:#1d4ed8; --bluebg:#eff6ff; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.6 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; color:#1f2937; background:#f6f7f9; }
+  header { padding:18px 24px; background:#111827; color:#fff; }
+  header h1 { margin:0 0 4px; font-size:18px; }
+  header p { margin:0; color:#9ca3af; font-size:13px; }
+  main { max-width:1180px; margin:0 auto; padding:20px 24px 48px; }
+  .toolbar { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:16px; }
+  button { border:1px solid var(--bd); background:#fff; border-radius:8px; padding:9px 14px; font-size:14px; cursor:pointer; }
+  button:hover { border-color:#111827; }
+  button.primary { background:#111827; color:#fff; border-color:#111827; }
+  button.ghost { color:var(--mut); }
+  .panel { background:#fff; border:1px solid var(--bd); border-radius:10px; padding:16px 18px; margin-bottom:18px; }
+  .panel h2 { margin:0 0 10px; font-size:15px; }
+  .hint { color:var(--mut); font-size:13px; margin:0 0 10px; }
+  table { border-collapse:collapse; width:100%; font-size:13px; }
+  th, td { border:1px solid var(--bd); padding:6px 9px; text-align:left; white-space:nowrap; }
+  th { background:#f3f4f6; font-weight:600; }
+  td.wrap { white-space:normal; min-width:260px; }
+  .tag { display:inline-block; padding:1px 8px; border-radius:999px; font-size:12px; }
+  .tag.open { background:var(--warnbg); color:var(--warn); border:1px solid #fde68a; }
+  .tag.withdrawn { background:#f3f4f6; color:var(--mut); border:1px solid var(--bd); text-decoration:line-through; }
+  .tag.final { background:var(--okbg); color:var(--ok); border:1px solid #a7f3d0; }
+  .tag.provisional { background:var(--warnbg); color:var(--warn); border:1px solid #fde68a; }
+  .tag.seg { background:var(--bluebg); color:var(--blue); border:1px solid #bfdbfe; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+  @media (max-width:900px){ .grid2 { grid-template-columns:1fr; } }
+  code { background:#f3f4f6; padding:1px 5px; border-radius:4px; }
+  .rev { border-left:3px solid var(--blue); padding:8px 12px; margin:8px 0; background:#fafafa; border-radius:0 8px 8px 0; font-size:13px; }
+  .muted { color:var(--mut); }
+  .num { text-align:right; font-variant-numeric:tabular-nums; }
+  .flash { animation:flash 1.2s ease; }
+  @keyframes flash { 0%{ background:#fef3c7; } 100%{ background:transparent; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>机械表采集：换表工单迟到 × 读数回拨重传 —— 证据化处理</h1>
+  <p>按表号独立累计（新表从 0 起算，绝不跨表相减）；按用户依表计关系段连续归并。换表看工单证据，回拨看同表读数对证据，重传看版本链证据。</p>
+</header>
+<main>
+  <div class="toolbar">
+    <button class="primary" id="btn-ingest">① 接入换表前后读数</button>
+    <button id="btn-wo">② 补交换表工单</button>
+    <button id="btn-rev">③ 打开用量修订（重传回拨订正）</button>
+    <button class="ghost" id="btn-reset">重置演示数据</button>
+  </div>
+
+  <!-- 业务结果区：data-evidence-result 供操作前后核对 -->
+  <section class="panel" id="result-panel" data-evidence-result="">
+    <h2>业务结果区 <span class="muted" id="snap-label"></span></h2>
+    <p class="hint" id="action-hint">点击上方按钮，所有结果均由服务端实际处理后返回（非静态写死）。</p>
+
+    <h2>表计关系段（换表证据：工单）</h2>
+    <table id="seg-table"><thead><tr><th>用户</th><th>表号</th><th>生效起</th><th>生效止</th><th>段类型</th><th>工单证据</th></tr></thead><tbody></tbody></table>
+
+    <div class="grid2" style="margin-top:16px">
+      <div>
+        <h2>表计日用量（按表号独立累计）</h2>
+        <table id="meter-table"><thead><tr><th>日期</th><th>用户</th><th>表号</th><th class="num">读数</th><th class="num">日用量</th><th>状态</th><th>计算依据 / 证据</th></tr></thead><tbody></tbody></table>
+      </div>
+      <div>
+        <h2>用户日用量（按关系段连续归并）</h2>
+        <table id="user-table"><thead><tr><th>日期</th><th>用户</th><th class="num">日用量</th><th>归并表号</th><th>状态</th></tr></thead><tbody></tbody></table>
+      </div>
+    </div>
+
+    <h2 style="margin-top:16px">异常台账（含撤回的误判）</h2>
+    <table id="anomaly-table"><thead><tr><th>类型</th><th>状态</th><th>表号</th><th>日期</th><th>说明</th><th>证据</th></tr></thead><tbody></tbody></table>
+
+    <h2 style="margin-top:16px">生效读数（含重传版本链）</h2>
+    <table id="reading-table"><thead><tr><th>日期</th><th>表号</th><th class="num">读数</th><th class="num">版本</th><th>接收时间</th></tr></thead><tbody></tbody></table>
+  </section>
+
+  <section class="panel">
+    <h2>用量修订记录（撤回旧解释 → 按两段重算的前后对比）</h2>
+    <div id="revisions"><p class="muted">尚无修订。</p></div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+async function call(pathname, opts) {
+  const res = await fetch(pathname, { method: 'POST', ...opts });
+  if (!res.ok) throw new Error((await res.json()).error || 'request failed');
+  return res.json();
+}
+
+function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function tag(cls, text) { return `<span class="tag ${cls}">${esc(text)}</span>`; }
+
+const BASIS_TEXT = {
+  'first-reading': '表计首读数，无前值证据，用量 0',
+  'consecutive-delta': '同表相邻读数差值',
+  'rollback-clamped': '读数回拨，钳为 0（读数对证据）',
+  'unlinked-meter-delta': '无表计关系，挂起（待工单证据）',
+  'recomputed-after-work-order': '工单到达后两段重算转正式',
+};
+const SEG_TEXT = { 'single':'单表段', 'before-replace':'换表前旧表段', 'after-replace':'换表后新表段', 'unlinked':'无关系（挂起）' };
+
+function evidenceText(ev) {
+  if (!ev) return '';
+  if (ev.kind === 'workOrder') return `工单 ${esc(ev.workOrderId || '')}${ev.replaceDate ? ' @ ' + esc(ev.replaceDate) : ''}`;
+  if (ev.kind === 'reading-pair') return `读数对 ${esc(ev.fromDate)}=${esc(ev.fromReading)} → Δ=${esc(ev.delta)}`;
+  if (ev.kind === 'missing-meter-link') return `缺表计关系（${esc(ev.meterId)} @ ${esc(ev.date)}）`;
+  if (ev.kind === 'first-reading') return '首读数';
+  return esc(ev.kind);
+}
+
+function render(state) {
+  $('snap-label').textContent = `— 快照：${state.label || ''}（${new Date(state.at || Date.now()).toLocaleString('zh-CN')}）`;
+
+  $('seg-table').querySelector('tbody').innerHTML = (state.segments || []).map((s) =>
+    `<tr><td>${esc(s.userId)}</td><td>${esc(s.meterId)}</td><td>${esc(s.startDate)}</td><td>${esc(s.endDate || '至今')}</td>
+     <td>${tag('seg', SEG_TEXT[s.kind] || s.kind)}</td><td>${s.workOrderId ? esc(s.workOrderId) : '<span class="muted">—</span>'}</td></tr>`
+  ).join('') || '<tr><td colspan="6" class="muted">无</td></tr>';
+
+  $('meter-table').querySelector('tbody').innerHTML = (state.dailyUsage || []).map((r) =>
+    `<tr><td>${esc(r.date)}</td><td>${esc(r.userId)}</td><td>${esc(r.meterId)}</td><td class="num">${esc(r.reading)}</td>
+     <td class="num"><strong>${esc(r.usage)}</strong></td><td>${tag(r.status, r.status === 'final' ? '正式' : '挂起')}</td>
+     <td class="wrap">${esc(BASIS_TEXT[r.basis] || r.basis)}<br><span class="muted">证据：${evidenceText(r.evidence)}</span></td></tr>`
+  ).join('') || '<tr><td colspan="7" class="muted">无</td></tr>';
+
+  $('user-table').querySelector('tbody').innerHTML = (state.userDailyUsage || []).map((r) =>
+    `<tr><td>${esc(r.date)}</td><td>${esc(r.userId)}</td><td class="num"><strong>${esc(r.usage)}</strong></td>
+     <td>${esc(r.meterIds.join(' + '))}</td><td>${tag(r.status, r.status === 'final' ? '正式' : '挂起')}</td></tr>`
+  ).join('') || '<tr><td colspan="5" class="muted">无</td></tr>';
+
+  $('anomaly-table').querySelector('tbody').innerHTML = (state.anomalies || []).map((a) =>
+    `<tr><td>${esc(a.type)}</td><td>${tag(a.status, a.status === 'open' ? '待解释' : '已撤回')}</td>
+     <td>${esc(a.meterId || '')}</td><td>${esc(a.date || '')}</td><td class="wrap">${esc(a.message)}</td><td class="wrap">${evidenceText(a.evidence)}</td></tr>`
+  ).join('') || '<tr><td colspan="6" class="muted">无异常</td></tr>';
+
+  $('reading-table').querySelector('tbody').innerHTML = (state.readings || []).slice().sort((a,b) =>
+    a.meterId.localeCompare(b.meterId) || a.date.localeCompare(b.date) || a.version - b.version
+  ).map((r) =>
+    `<tr><td>${esc(r.date)}</td><td>${esc(r.meterId)}</td><td class="num">${esc(r.reading)}</td><td class="num">v${esc(r.version)}</td><td>${esc(new Date(r.receivedAt).toLocaleTimeString('zh-CN'))}</td></tr>`
+  ).join('');
+
+  // 同步更新 data-evidence-result，便于外部核对操作前后内容
+  $('result-panel').setAttribute('data-evidence-result', JSON.stringify({
+    label: state.label,
+    segmentCount: (state.segments || []).length,
+    meterUsage: (state.dailyUsage || []).map((r) => ({ meterId: r.meterId, date: r.date, usage: r.usage, status: r.status })),
+    userUsage: (state.userDailyUsage || []).map((r) => ({ userId: r.userId, date: r.date, usage: r.status === 'provisional' ? null : r.usage, provisional: r.status === 'provisional' })),
+    anomalies: (state.anomalies || []).map((a) => ({ type: a.type, status: a.status, meterId: a.meterId, date: a.date })),
+    negativeUsageFound: (state.dailyUsage || []).some((r) => r.usage < 0),
+  }));
+  $('result-panel').classList.remove('flash'); void $('result-panel').offsetWidth; $('result-panel').classList.add('flash');
+}
+
+async function renderRevisions() {
+  const data = await (await fetch('/api/revisions')).json();
+  const box = $('revisions');
+  const items = (data.revisions || []).filter((s) => s.revisions.length);
+  if (!items.length) { box.innerHTML = '<p class="muted">尚无修订。</p>'; return; }
+  box.innerHTML = items.map((s) =>
+    `<div class="rev"><strong>#${s.index} ${esc(s.label)}</strong><br>` +
+    s.revisions.map((ch) => {
+      if (ch.kind === 'usage-revised') return `用量修订 <code>${esc(ch.key)}</code>：${esc(ch.before.usage)}（${esc(ch.before.status)}）→ <strong>${esc(ch.after.usage)}</strong>（${esc(ch.after.status)}，${esc(ch.after.basis)}）`;
+      if (ch.kind === 'usage-added') return `新增用量 <code>${esc(ch.key)}</code> = ${esc(ch.after.usage)}`;
+      if (ch.kind === 'anomaly-status-changed') return `异常 <code>${esc(ch.key)}</code>：${esc(ch.before.status)} → <strong>${esc(ch.after.status)}</strong>，证据：${evidenceText(ch.after.evidence)}`;
+      if (ch.kind === 'anomaly-opened') return `新异常 <code>${esc(ch.key)}</code>（${esc(ch.after.type)}）`;
+      return esc(ch.kind);
+    }).join('<br>') + '</div>'
+  ).join('');
+}
+
+async function refresh() {
+  const state = await (await fetch('/api/state')).json();
+  render(state);
+  await renderRevisions();
+}
+
+async function run(btn, pathname, hint) {
+  btn.disabled = true;
+  try {
+    const out = await call(pathname);
+    $('action-hint').textContent = hint;
+    render(out.state);
+    await renderRevisions();
+  } catch (e) {
+    $('action-hint').textContent = '处理失败：' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+$('btn-ingest').addEventListener('click', (e) => run(e.target, '/api/demo/ingest-readings',
+  '① 读数已接入：新表 M-NEW-1 无表计关系，仓储端误判“读数掉零”（SUSPECTED_DROP_ZERO），用户归并挂起；注意表计层面用量仍按表号独立累计且非负。'));
+$('btn-wo').addEventListener('click', (e) => run(e.target, '/api/demo/ingest-work-order',
+  '② 工单已补交：误判撤回（withdrawn，证据为工单 WO-20261120-001），关系拆成换表前/后两段，日用量按两段重算并转正式。'));
+$('btn-rev').addEventListener('click', (e) => run(e.target, '/api/demo/retransmission',
+  '③ 重传已接入：v2 版本链生效，11/19 订正为 118；同表读数对证明回拨，日用量钳 0，无任何负用量。'));
+$('btn-reset').addEventListener('click', async () => { await call('/api/reset'); $('action-hint').textContent = '已重置为基线数据。'; await refresh(); });
+
+refresh();
+</script>
+</body>
+</html>
